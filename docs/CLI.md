@@ -238,6 +238,19 @@ ima2 multimode "two cats playing" --max-images 2 --ref cat.png --mode direct
 ima2 node generate --node n_abc --prompt "add neon lights" --no-stream
 ```
 
+### Animated GIF output
+
+`ima2 gen --gif` asks the GPT OAuth lane for an animated GIF, with or without `--ref`:
+
+```bash
+ima2 gen "a cat blinking, same framing throughout" --gif --gif-frames 6 --gif-frame-ms 120 -o cat.gif
+```
+
+- `--gif-frames` takes 2 to 16 (default 9) and `--gif-frame-ms` takes 20 to 2000 (default 200).
+- `-o` must end in `.gif`, and `--size` sets each frame; both sides must be multiples of 16.
+- OpenAI rolls this out per account. A `GIF_NOT_ENABLED` error means your ChatGPT account does not have it yet.
+- Other lanes refuse the request, and so does `--bg`.
+
 ### Prompting with visible text
 
 GPT Image 2 can render visible text in generated images. If the output needs

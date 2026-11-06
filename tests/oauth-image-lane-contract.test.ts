@@ -151,4 +151,97 @@ if (executionTestProcess(import.meta.url)) describe("GPT OAuth image lane contra
       assert.deepEqual(prompts.sort(), ["stage one", "stage two"]);
     });
   });
+
+  describe("animated GIF output", () => {
+    const GIF_BASE = { ...BASE, mode: "direct", model: "gpt-6-luna", size: "512x512", webSearchEnabled: false };
+    let gif: string;
+    before(async () => {
+      const frames = await Promise.all([red, green].map((b64) => sharp(Buffer.from(b64, "base64")).raw().toBuffer()));
+      gif = (await sharp(Buffer.concat(frames), { raw: { width: 8, height: 16, channels: 3, pageHeight: 8 } })
+        .gif({ delay: 120 }).toBuffer()).toString("base64");
+    });
+
+    it("text only: the JSON body carries the GIF fields and the bytes are saved untouched", async () => {
+      await harness.run("classic", { upstream: () => imagesJson(gif) }, async (f) => {
+        const response = await f.post({ ...GIF_BASE, gif: { frameCount: 4, frameDurationMs: 120 } });
+        assert.equal(response.status, 200);
+        const result = await response.json();
+        await f.waitSettled();
+        assert.deepEqual(f.calls.map(endpointOf), ["/v1/images/generations"]);
+        const { json } = await fields(f.calls[0]!);
+        assert.equal(json.output_format, "gif");
+        assert.equal(json.frame_count, 4);
+        assert.equal(json.frame_duration_ms, 120);
+        assert.equal(result.image, `data:image/gif;base64,${gif}`);
+        assert.match(result.filename, /\.gif$/);
+        assert.deepEqual(await readFile(join(f.generatedDir, result.filename)), Buffer.from(gif, "base64"));
+        assert.equal((await meta(f, result.filename)).format, "gif");
+        // Imported here: a top-level import would load config before the harness isolates it.
+        const { listHistoryRows } = await import("../lib/historyList.ts");
+        const rows = await listHistoryRows(f.generatedDir);
+        assert.ok(rows.some((row) => row.filename === result.filename), "the gallery lists GIFs");
+      });
+    });
+
+    it("with a reference: the edit form carries the GIF fields", async () => {
+      await harness.run("classic", { upstream: () => imagesJson(gif) }, async (f) => {
+        const response = await f.post({ ...GIF_BASE, references: [green], gif: { frameCount: 6 } });
+        assert.equal(response.status, 200);
+        await f.waitSettled();
+        assert.deepEqual(f.calls.map(endpointOf), ["/v1/images/edits"]);
+        const { json, images } = await fields(f.calls[0]!);
+        assert.equal(json.output_format, "gif");
+        assert.equal(json.frame_count, "6");
+        assert.equal(json.frame_duration_ms, undefined, "omitted controls keep the API default");
+        assert.equal(images, 1);
+      });
+    });
+
+    it("gif: true sends only the format", async () => {
+      await harness.run("classic", { upstream: () => imagesJson(gif) }, async (f) => {
+        assert.equal((await f.post({ ...GIF_BASE, gif: true })).status, 200);
+        await f.waitSettled();
+        const { json } = await fields(f.calls[0]!);
+        assert.equal(json.output_format, "gif");
+        assert.equal(json.frame_count, undefined);
+      });
+    });
+
+    it("a still answer to a GIF request fails instead of saving a fake .gif", async () => {
+      await harness.run("classic", { upstream: () => imagesJson(red) }, async (f) => {
+        const response = await f.post({ ...GIF_BASE, gif: true });
+        assert.equal(response.status, 502);
+        assert.equal((await response.json()).code, "GIF_OUTPUT_NOT_RETURNED");
+        await f.waitSettled();
+        assert.deepEqual(await readdir(f.generatedDir), []);
+      });
+    });
+
+    it("names the rollout gate instead of a generic rejection", async () => {
+      const gated = () => new Response(JSON.stringify({ detail: "GIF output is not enabled for this request." }), { status: 400 });
+      await harness.run("classic", { upstream: gated }, async (f) => {
+        const response = await f.post({ ...GIF_BASE, gif: true });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).code, "GIF_NOT_ENABLED");
+        await f.waitSettled();
+        assert.equal(f.calls.length, 1, "a gated request is not retried");
+      });
+    });
+
+    for (const [label, extra, code] of [
+      ["too many frames", { gif: { frameCount: 17 } }, "GIF_OPTIONS_INVALID"],
+      ["too short a frame", { gif: { frameDurationMs: 10 } }, "GIF_OPTIONS_INVALID"],
+      ["a non-object", { gif: "yes" }, "GIF_OPTIONS_INVALID"],
+      ["a background preset", { gif: true, backgroundPreset: "white" }, "GIF_BACKGROUND_UNSUPPORTED"],
+    ] as const) {
+      it(`refuses ${label} before any upstream call`, async () => {
+        await harness.run("classic", { upstream: () => imagesJson(gif) }, async (f) => {
+          const response = await f.post({ ...GIF_BASE, ...extra });
+          assert.equal(response.status, 400);
+          assert.equal((await response.json()).code, code);
+          assert.deepEqual(f.calls, []);
+        });
+      });
+    }
+  });
 });

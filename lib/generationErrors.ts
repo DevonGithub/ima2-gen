@@ -5,6 +5,8 @@ import { safeDiagnosticLabel, type ResponseDiagnostics } from "./responsesParse.
 import { RESPONSE_DIAGNOSTIC_CODES } from "./responsesErrors.js";
 
 const PASSTHROUGH_CODES = new Set([
+  "GIF_NOT_ENABLED",
+  "GIF_OUTPUT_NOT_RETURNED",
   "GROK_API_KEY_MISSING",
   "OAUTH_UNAVAILABLE",
   "NETWORK_FAILED",

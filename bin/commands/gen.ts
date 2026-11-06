@@ -17,6 +17,7 @@ import { createCliRequestId, recoverGeneratedOutputs, formatRecoveryHint } from 
 import { deriveProviderIds } from "../../lib/providers/derive.js";
 import { listProviders } from "../../lib/mcp/providerRegistry.js";
 import { BACKGROUND_PRESETS } from "../../lib/backgroundPresets.js";
+import { parseGifOptions, type GifOptions } from "../../lib/gifOutput.js";
 import { NAI_CLI_FLAGS, NAI_CLI_HELP, finalizeNaiCliTarget, parseNaiCliOptions,
   unwrapNaiCliResult, type NaiCliPreflight } from "../lib/nai-options.js";
 const VALID_MODES = new Set(["auto", "direct"]);
@@ -44,6 +45,7 @@ const SPEC = {
     stdin: { type: "boolean" }, timeout: { type: "string", default: "180" }, server: { type: "string" },
     model: { type: "string" }, provider: { type: "string" }, mode: { type: "string", default: "auto" },
     moderation: { type: "string", default: "low" }, bg: { type: "string" }, session: { type: "string" },
+    gif: { type: "boolean" }, "gif-frames": { type: "string" }, "gif-frame-ms": { type: "string" },
     character: { type: "string" },
     "reasoning-effort": { type: "string" }, "web-search": { type: "boolean" },
     "no-web-search": { type: "boolean" }, help: { short: "h", type: "boolean" },
@@ -83,6 +85,9 @@ const HELP = `
                                             'auto' was removed; choose a lane explicitly
         --mode <auto|direct>                Core lanes only. Default: auto
         --moderation <auto|low>             Core lanes only. Default: low
+        --gif                               GPT OAuth lane only: animated GIF (-o must end in .gif)
+        --gif-frames <2..16>                GIF frame count. Default: 9
+        --gif-frame-ms <20..2000>           Time per GIF frame in ms. Default: 200
         --bg <chroma-green|white|black|transparent>
                                             Core lanes only. 'transparent' asks GPT Image 2
                                             for a real alpha channel (saved as PNG)
@@ -97,6 +102,7 @@ ${NAI_CLI_HELP}
     ima2 gen "a shiba in space"
     ima2 gen "poster" --model oauth/luna --mode direct
     ima2 gen "fox logo mark" --bg transparent -o logo.png
+    ima2 gen "a cat blinking, same frame throughout" --gif --gif-frames 6 -o cat.gif
     ima2 gen "campaign still" --model runway/gen-4 --ref 1780000000000_abcd.png
     ima2 gen "transparent character sprite" --provider nai --model nai-diffusion-5-full --nai-straight-alpha --nai-negative-prompt "watermark"
 `;
@@ -203,6 +209,7 @@ function rejectUnsupportedMcpFlags(argv: string[], args: ParsedArgs): void {
     ["--quality", ["--quality", "-q"]], ["--size", ["--size", "-s"]],
     ["--no-save", ["--no-save"]], ["--force", ["--force"]], ["--stdin", ["--stdin"]],
     ["--mode", ["--mode"]], ["--moderation", ["--moderation"]], ["--bg", ["--bg"]],
+    ["--gif", ["--gif", "--gif-frames", "--gif-frame-ms"]],
     ["--session", ["--session"]], ["--reasoning-effort", ["--reasoning-effort"]],
     ["--web-search", ["--web-search"]], ["--no-web-search", ["--no-web-search"]],
   ];
@@ -293,7 +300,22 @@ async function runMcpImage(argv: string[], args: ParsedArgs, context: ImageConte
   }
 }
 
+function gifRequest(args: ParsedArgs): GifOptions | null {
+  if (!args.gif) {
+    if (args["gif-frames"] || args["gif-frame-ms"]) die(2, "--gif-frames and --gif-frame-ms need --gif");
+    return null;
+  }
+  if (args.out && !String(args.out).toLowerCase().endsWith(".gif")) die(2, "--out must end in .gif with --gif");
+  const parsed = parseGifOptions({
+    ...(args["gif-frames"] ? { frameCount: Number(args["gif-frames"]) } : {}),
+    ...(args["gif-frame-ms"] ? { frameDurationMs: Number(args["gif-frame-ms"]) } : {}),
+  });
+  if ("error" in parsed) die(2, parsed.error);
+  return parsed.gif;
+}
+
 function validateCoreFlags(args: ParsedArgs): void {
+  gifRequest(args);
   if (!VALID_MODES.has(String(args.mode))) die(2, "--mode must be one of: auto, direct");
   if (!VALID_MODERATION.has(String(args.moderation))) die(2, "--moderation must be one of: auto, low");
   // Fail locally on a typo instead of spending a round trip to learn the
@@ -316,6 +338,8 @@ async function requestCoreImage(
     provider: context.target.lane, ...context.naiOptions };
   body.requestId = requestId;
   if (args.bg) body.backgroundPreset = String(args.bg);
+  const gif = gifRequest(args);
+  if (gif) body.gif = gif;
   if (args["image-tool-model"]) body.imageToolModel = args["image-tool-model"];
   if (args["reasoning-effort"]) body.reasoningEffort = args["reasoning-effort"];
   if (args["no-web-search"]) body.webSearchEnabled = false;
@@ -357,11 +381,12 @@ async function runCoreImage(args: ParsedArgs, context: ImageContext): Promise<vo
   }
   if (context.explicitOut && norm.images.length > 1) die(2, "--out only supports a single image; use --out-dir for n>1");
   const paths: string[] = [];
+  const outExt = args.gif ? "gif" : "png";
   for (let i = 0; i < norm.images.length; i += 1) {
     let target: string;
     if (context.explicitOut) target = resolveOutTarget(context.explicitOut, context.outDir);
-    else if (context.outDir) target = `${context.outDir}/${defaultOutName(i, norm.images.length)}`;
-    else target = `${config.storage.generatedDir}/${defaultOutName(i, norm.images.length)}`;
+    else if (context.outDir) target = `${context.outDir}/${defaultOutName(i, norm.images.length, outExt)}`;
+    else target = `${config.storage.generatedDir}/${defaultOutName(i, norm.images.length, outExt)}`;
     const image = norm.images[i];
     if (!image) continue;
     await dataUriToFile(String(image.image), target);

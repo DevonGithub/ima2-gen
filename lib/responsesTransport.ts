@@ -287,6 +287,12 @@ async function readOAuthImages(res: Response, args: PostOAuthImagesArgs, wait: T
   logEvent(scope, "images_response", { requestId, kind, status: res.status });
   const text = await wait(() => res.text());
   if (!res.ok) {
+    // The server-side rollout gate; the generic rejection below would hide it.
+    if (res.status === 400 && text.includes("GIF output is not enabled")) {
+      throw makeError("GIF output is not enabled for this ChatGPT account yet", {
+        status: 400, code: "GIF_NOT_ENABLED", upstreamBodyChars: text.length,
+      });
+    }
     const upstream = parseOpenAIErrorBody(text);
     const rateLimit = rateLimitFieldsOf(ctx, res, upstream, text);
     if (res.status >= 400 && res.status < 500 && upstream?.message) {

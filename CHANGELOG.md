@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Animated GIF output on the GPT OAuth lane** — `POST /api/generate` takes `gif: true` or `gif: { frameCount, frameDurationMs }`, and `ima2 gen` takes `--gif`, `--gif-frames` and `--gif-frame-ms`. It uses the same Images API fields as Codex, works with or without references, and saves the GIF bytes untouched, with the metadata in the sidecar JSON. Other lanes refuse the request instead of returning a still.
+
 ## [3.26.2] - 2026-10-04
 
 ### Added

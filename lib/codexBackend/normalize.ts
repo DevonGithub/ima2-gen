@@ -110,14 +110,15 @@ export async function collectCompletedResponse(body: ReadableStream<Uint8Array>)
   return result;
 }
 
-const EDIT_SCALARS = ["model", "prompt", "background", "quality", "size", "moderation", "output_format", "n"] as const;
+const EDIT_SCALARS = ["model", "prompt", "background", "quality", "size", "moderation", "output_format", "n", "frame_count", "frame_duration_ms"];
+const EDIT_NUMBERS = new Set(["n", "frame_count", "frame_duration_ms"]);
 
 /** The Codex images edit endpoint takes JSON with data-URL images; accept the OpenAI multipart shape too. */
 export async function editsFormToJson(form: FormData): Promise<Json> {
   const body: Json = {};
   for (const key of EDIT_SCALARS) {
     const value = form.get(key);
-    if (typeof value === "string" && value) body[key] = key === "n" ? Number(value) : value;
+    if (typeof value === "string" && value) body[key] = EDIT_NUMBERS.has(key) ? Number(value) : value;
   }
   type Upload = { type: string; arrayBuffer(): Promise<ArrayBuffer> };
   const files = [...form.getAll("image"), ...form.getAll("image[]")]

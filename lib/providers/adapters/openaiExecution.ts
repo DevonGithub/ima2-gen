@@ -70,6 +70,7 @@ function prepareOpenaiClassic(
             allowPromptOnlyOAuthFallback: activeProvider !== "api",
             ...(backgroundParams ? { background: backgroundParams.background } : {}),
             ...(backgroundParams?.outputFormat ? { outputFormat: backgroundParams.outputFormat } : {}),
+            ...(request.options.gif ? { gif: request.options.gif } : {}),
           },
         );
         throwIfJobCanceled(requestId);

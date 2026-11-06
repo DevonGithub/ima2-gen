@@ -1,3 +1,4 @@
+import type { GifOptions } from "../../gifOutput.js";
 import type { RuntimeContext } from "../../runtimeContext.js";
 import type { CoreProviderId } from "../registry.js";
 import type { validateAndNormalizeRefs } from "../../refs.js";
@@ -20,6 +21,7 @@ export interface ExecutionOptions {
   mode: "auto" | "direct";
   reasoningEffort: string | undefined;
   webSearchEnabled: boolean;
+  gif?: GifOptions | undefined;
 }
 interface ExecutionBase {
   provider: CoreProviderId; // resolved; never "auto" or an arbitrary string

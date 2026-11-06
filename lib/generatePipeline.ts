@@ -3,6 +3,7 @@ import { safeWriteSidecar, atomicWriteJson } from "./atomicWrite.js";
 import { isAbsolute, join } from "path";
 import { randomBytes } from "crypto";
 import { buildFilename, writeFileUnique } from "./filename.js";
+import { parseGifOptions } from "./gifOutput.js";
 import type { Request, Response } from "express";
 import { detectImageMimeFromB64, summarizeReferencePayload, validateAndNormalizeRefs } from "./refs.js";
 import { generateImageThumbnailFromBuffer } from "./imageThumb.js";
@@ -156,6 +157,12 @@ export async function runGeneratePipeline(req: Request, res: Response, ctx: Runt
         return fail(400, { error: backgroundParse.error, code: backgroundParse.code });
       }
       const backgroundPreset = backgroundParse.preset;
+      const gifParse = parseGifOptions(req.body?.gif);
+      if ("error" in gifParse) return fail(400, gifParse);
+      const gif = gifParse.gif;
+      if (gif && backgroundPreset) {
+        return fail(400, { error: "GIF output cannot use a background preset", code: "GIF_BACKGROUND_UNSUPPORTED" });
+      }
       // `format` is the canonical request field (default "png"). Validating
       // req.body.outputFormat instead would let format:"jpeg" slip past and
       // then get transcoded to JPEG on save, destroying the alpha channel.
@@ -187,6 +194,9 @@ export async function runGeneratePipeline(req: Request, res: Response, ctx: Runt
       const effectiveSize = providerOptions.size;
       const webSearchEnabled = providerOptions.webSearchEnabled;
       const activeProvider = providerOptions.provider;
+      if (gif && activeProvider !== "oauth") {
+        return fail(400, { error: "GIF output is only available on the GPT OAuth lane", code: "GIF_PROVIDER_UNSUPPORTED" });
+      }
       // Resolved AFTER provider resolution on purpose: the raw request `provider`
       // defaults to "auto", so only `activeProvider` names the lane that will
       // actually run. Atlas Cloud and GPT OAuth (the Codex Images API since the
@@ -398,14 +408,16 @@ export async function runGeneratePipeline(req: Request, res: Response, ctx: Runt
         webSearchEnabled,
       });
       const startTime = Date.now();
-      const mimeMap: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
+      const mimeMap: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
       const providerForcesJpeg = activeProvider === "grok" || activeProvider === "agy" || activeProvider === "grok-api" || activeProvider === "gemini-api" || activeProvider === "atlascloud" || activeProvider === "minimax";
       // An alpha-bearing result must never be persisted through a lossy opaque
       // format: embedImageMetadata re-encodes with sharp.toFormat(), so a JPEG
       // here silently flattens the transparency we just asked for.
-      const effectiveFormat = backgroundParams
-        ? (backgroundParams.outputFormat ?? "png")
-        : (providerForcesJpeg ? "jpeg" : String(format));
+      const effectiveFormat = gif
+        ? "gif"
+        : backgroundParams
+          ? (backgroundParams.outputFormat ?? "png")
+          : (providerForcesJpeg ? "jpeg" : String(format));
       const mime = mimeMap[effectiveFormat] || "image/png";
       await mkdir(ctx.config.storage.generatedDir, { recursive: true });
       const execution = await prepareImageExecution(ctx, {
@@ -413,7 +425,7 @@ export async function runGeneratePipeline(req: Request, res: Response, ctx: Runt
         signal: cancelController.signal, prompt: generationPrompt, rawPrompt: prompt,
         references: refCheck.refDetails, providerUrl: incomingProviderUrl,
         options: { model: imageModel, imageToolModel, quality, size: effectiveSize, moderation,
-          mode: normalizedPromptMode, reasoningEffort, webSearchEnabled },
+          mode: normalizedPromptMode, reasoningEffort, webSearchEnabled, ...(gif ? { gif } : {}) },
         background: backgroundParams,
         backgroundConstraint: backgroundPreset ? backgroundPlannerConstraint(backgroundPreset) : undefined,
         nai: activeProvider === "nai" ? readNaiOptions(req.body) : {},

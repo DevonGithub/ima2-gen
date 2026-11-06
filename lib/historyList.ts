@@ -16,7 +16,7 @@ async function listImageFiles(baseDir: string) {
       const full = join(dir, entry.name);
       if (entry.isDirectory() && depth > 0) {
         await walk(full, depth - 1);
-      } else if (entry.isFile() && /\.(png|jpe?g|webp|mp4)$/i.test(entry.name) && !entry.name.endsWith(".thumb.jpg")) {
+      } else if (entry.isFile() && /\.(png|jpe?g|webp|gif|mp4)$/i.test(entry.name) && !entry.name.endsWith(".thumb.jpg")) {
         out.push({ full, rel: full.slice(baseDir.length + 1), name: entry.name });
       }
     }

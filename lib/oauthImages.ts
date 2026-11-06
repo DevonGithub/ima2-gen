@@ -13,6 +13,7 @@
  */
 import { config } from "../config.js";
 import { createOAuthJobDeadline, throwIfOAuthAborted } from "./oauthJobDeadline.js";
+import { gifRenderFields, isGifB64, type GifOptions } from "./gifOutput.js";
 import { logEvent } from "./logger.js";
 import type { RouteRuntimeContext } from "./runtimeContext.js";
 import type {
@@ -72,6 +73,7 @@ export interface OAuthImageJob {
   size?: string | undefined;
   moderation?: string | undefined;
   background?: string | undefined;
+  gif?: GifOptions | null | undefined;
   onFinalImage?: FinalImageHandler | null | undefined;
 }
 
@@ -159,14 +161,15 @@ export function promptsFromCalls(calls: ParsedFunctionCall[] | undefined, maxIma
 }
 
 /** Map ima2's request fields onto what the OAuth Images API accepts. */
-export function renderFields(job: Pick<OAuthImageJob, "quality" | "size" | "background" | "moderation">) {
-  const fields: Record<string, string> = {};
+export function renderFields(job: Pick<OAuthImageJob, "quality" | "size" | "background" | "moderation" | "gif">) {
+  const fields: Record<string, string | number> = {};
   const quality = job.quality === "xhigh" || job.quality === "max" ? "high" : job.quality;
   if (quality && IMAGES_QUALITY.has(quality)) fields.quality = quality;
   if (job.size && job.size !== "auto" && /^\d+x\d+$/.test(job.size)) fields.size = job.size;
   if (job.background && ["transparent", "opaque", "auto"].includes(job.background)) fields.background = job.background;
   // Measured 2026-09-25: the ChatGPT Images endpoint accepts moderation "low" (200, one image).
   if (job.moderation === "auto" || job.moderation === "low") fields.moderation = job.moderation;
+  if (job.gif) Object.assign(fields, gifRenderFields(job.gif));
   return fields;
 }
 
@@ -186,7 +189,13 @@ function withRateLimitBackoff<T>(job: OAuthImageJob, budget: OAuthRateLimitBudge
 }
 
 async function renderOne(job: OAuthImageJob, budget: OAuthRateLimitBudget, prompt: string) {
-  return withRateLimitBackoff(job, budget, "render", () => renderOnce(job, prompt));
+  const rendered = await withRateLimitBackoff(job, budget, "render", () => renderOnce(job, prompt));
+  // A still saved as .gif would look like a success; refuse it instead.
+  const b64 = rendered.images[0]?.b64;
+  if (job.gif && b64 && !isGifB64(b64)) {
+    throw Object.assign(new Error("GPT OAuth did not return a GIF"), { status: 502, code: "GIF_OUTPUT_NOT_RETURNED" });
+  }
+  return rendered;
 }
 
 async function renderOnce(job: OAuthImageJob, prompt: string) {
@@ -204,7 +213,7 @@ async function renderOnce(job: OAuthImageJob, prompt: string) {
   const form = new FormData();
   form.set("model", OAUTH_RENDER_MODEL);
   form.set("prompt", prompt);
-  for (const [key, value] of Object.entries(fields)) form.set(key, value);
+  for (const [key, value] of Object.entries(fields)) form.set(key, String(value));
   job.images.slice(0, OAUTH_MAX_EDIT_IMAGES).forEach((image, index) => {
     const blob = new Blob([Buffer.from(image.b64, "base64")], { type: image.mime });
     form.append("image", blob, `input-${index + 1}.${extensionFor(image.mime)}`);

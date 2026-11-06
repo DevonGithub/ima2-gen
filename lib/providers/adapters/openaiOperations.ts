@@ -99,6 +99,7 @@ export async function generateViaResponses(provider: string | undefined, prompt:
       size,
       moderation,
       background: options.background,
+      gif: options.gif,
       onFinalImage: options.onFinalImage,
     });
     const image = result.images[0];

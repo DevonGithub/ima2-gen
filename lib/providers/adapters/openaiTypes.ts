@@ -1,3 +1,4 @@
+import type { GifOptions } from "../../gifOutput.js";
 import type { FinalImageHandler } from "../../responsesParse.js";
 
 export type ReferenceRef = string | { b64?: string | undefined; detectedMime?: string | null; declaredMime?: string | null };
@@ -26,4 +27,6 @@ export interface GenerateOptions {
   background?: string | undefined;
   /** Alpha-capable output format ("png" | "webp") when transparency is requested. */
   outputFormat?: string | undefined;
+  /** Animated GIF controls; the GPT OAuth lane only (lib/gifOutput.ts). */
+  gif?: GifOptions | undefined;
 }
